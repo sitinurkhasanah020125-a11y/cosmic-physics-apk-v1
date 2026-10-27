@@ -1,0 +1,122 @@
+name: Build Cosmic Physics V1 APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'project/**'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      # 1. Mengambil file dari repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Memasang Java dan alat pendukung
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            unzip \
+            wget \
+            openjdk-17-jdk \
+            curl \
+            zip
+
+      # 3. Mengunduh Godot 4.3
+      - name: Download Godot 4.3
+        run: |
+          wget -q \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip \
+            -O godot.zip
+
+          unzip -o godot.zip
+          chmod +x Godot_v4.3-stable_linux.x86_64
+          sudo mv Godot_v4.3-stable_linux.x86_64 /usr/local/bin/godot
+
+      # 4. Memeriksa proyek Godot
+      - name: Check Godot Project
+        run: |
+          PROJECT_FILE=$(find project -name project.godot -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot tidak ditemukan di folder project/"
+            exit 1
+          fi
+
+          echo "Project ditemukan: $PROJECT_FILE"
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      # 5. Mengunduh Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 6. Memasang komponen Android SDK
+      - name: Install Android SDK Components
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "cmdline-tools;latest"
+
+      # 7. Mengunduh Android build template Godot
+      - name: Download Godot Android Templates
+        run: |
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
+
+          wget -q \
+            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz \
+            -O templates.tpz
+
+          unzip -o templates.tpz -d templates
+
+          cp templates/templates/android_debug.apk \
+            "$HOME/.local/share/godot/export_templates/4.3.stable/android_debug.apk"
+
+          cp templates/templates/android_release.apk \
+            "$HOME/.local/share/godot/export_templates/4.3.stable/android_release.apk"
+
+      # 8. Memeriksa konfigurasi export
+      - name: Check Export Preset
+        run: |
+          if [ ! -f "$PROJECT_DIR/export_presets.cfg" ]; then
+            echo "ERROR: export_presets.cfg tidak ditemukan."
+            echo "Tambahkan preset Android dari Godot Editor."
+            exit 1
+          fi
+
+      # 9. Mengekspor proyek menjadi APK
+      - name: Export Android APK
+        run: |
+          mkdir -p output
+
+          godot \
+            --headless \
+            --path "$PROJECT_DIR" \
+            --editor \
+            --quit
+
+          godot \
+            --headless \
+            --path "$PROJECT_DIR" \
+            --export-debug "Android" \
+            "$GITHUB_WORKSPACE/output/Cosmic-Physics-V1.apk"
+
+      # 10. Menyimpan APK agar bisa diunduh
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cosmic-Physics-V1-APK
+          path: output/Cosmic-Physics-V1.apk
+          if-no-files-found: error
+          retention-days: 7
