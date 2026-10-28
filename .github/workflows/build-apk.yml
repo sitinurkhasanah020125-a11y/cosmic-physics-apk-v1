@@ -2,9 +2,10 @@ name: Build Cosmic Physics V1 APK
 
 on:
   workflow_dispatch:
+
   push:
     paths:
-      - 'project/**'
+      - 'CosmicPhysics_Mobile_V1.zip'
       - '.github/workflows/build-apk.yml'
 
 permissions:
@@ -15,7 +16,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      # 1. Mengambil file dari repository
+      # 1. Mengambil file repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -27,7 +28,6 @@ jobs:
             unzip \
             wget \
             openjdk-17-jdk \
-            curl \
             zip
 
       # 3. Mengunduh Godot 4.3
@@ -38,25 +38,53 @@ jobs:
             -O godot.zip
 
           unzip -o godot.zip
+
           chmod +x Godot_v4.3-stable_linux.x86_64
-          sudo mv Godot_v4.3-stable_linux.x86_64 /usr/local/bin/godot
 
-      # 4. Memeriksa proyek Godot
-      - name: Check Godot Project
+          sudo mv \
+            Godot_v4.3-stable_linux.x86_64 \
+            /usr/local/bin/godot
+
+          godot --version
+
+      # 4. Mengekstrak proyek Godot
+      - name: Extract Godot Project
         run: |
-          PROJECT_FILE=$(find project -name project.godot -print -quit)
-
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: project.godot tidak ditemukan di folder project/"
+          if [ ! -f "CosmicPhysics_Mobile_V1.zip" ]; then
+            echo "ERROR: ZIP proyek tidak ditemukan!"
+            ls -la
             exit 1
           fi
 
-          echo "Project ditemukan: $PROJECT_FILE"
+          mkdir -p project
+
+          unzip -o CosmicPhysics_Mobile_V1.zip -d project
+
+          echo "Memeriksa file proyek..."
+
+          PROJECT_FILE=$(find project \
+            -type f \
+            -name project.godot \
+            -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot tidak ditemukan di dalam ZIP!"
+            echo "Pastikan ZIP berisi proyek Godot yang benar."
+            exit 1
+          fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      # 5. Mengunduh Android SDK
+          echo "Proyek ditemukan di: $PROJECT_DIR"
+
+          if [ ! -f "$PROJECT_DIR/export_presets.cfg" ]; then
+            echo "ERROR: export_presets.cfg tidak ditemukan!"
+            exit 1
+          fi
+
+      # 5. Memasang Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -66,13 +94,30 @@ jobs:
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "cmdline-tools;latest"
+            "build-tools;34.0.0"
 
-      # 7. Mengunduh Android build template Godot
-      - name: Download Godot Android Templates
+      # 7. Mengatur lingkungan Java dan Android
+      - name: Configure Android Environment
         run: |
-          mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          mkdir -p "$HOME/.config/godot"
+
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          EOF
+
+      # 8. Mengunduh template ekspor Godot 4.3
+      - name: Download Godot Export Templates
+        run: |
+          mkdir -p \
+            "$HOME/.local/share/godot/export_templates/4.3.stable"
 
           wget -q \
             https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz \
@@ -80,43 +125,63 @@ jobs:
 
           unzip -o templates.tpz -d templates
 
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
+
           cp templates/templates/android_debug.apk \
-            "$HOME/.local/share/godot/export_templates/4.3.stable/android_debug.apk"
+            "$TEMPLATE_DIR/android_debug.apk"
 
           cp templates/templates/android_release.apk \
-            "$HOME/.local/share/godot/export_templates/4.3.stable/android_release.apk"
+            "$TEMPLATE_DIR/android_release.apk"
 
-      # 8. Memeriksa konfigurasi export
-      - name: Check Export Preset
+          echo "Godot Android templates berhasil dipasang."
+
+      # 9. Memeriksa preset Android
+      - name: Check Android Export Preset
         run: |
-          if [ ! -f "$PROJECT_DIR/export_presets.cfg" ]; then
-            echo "ERROR: export_presets.cfg tidak ditemukan."
-            echo "Tambahkan preset Android dari Godot Editor."
+          if ! grep -q 'name="Android"' \
+            "$PROJECT_DIR/export_presets.cfg"; then
+
+            echo "ERROR: Preset Android tidak ditemukan!"
+            echo "Nama preset harus Android."
             exit 1
           fi
 
-      # 9. Mengekspor proyek menjadi APK
-      - name: Export Android APK
-        run: |
-          mkdir -p output
+          echo "Preset Android ditemukan."
 
+      # 10. Mengimpor proyek Godot
+      - name: Import Godot Project
+        run: |
           godot \
             --headless \
-            --path "$PROJECT_DIR" \
             --editor \
+            --path "$PROJECT_DIR" \
             --quit
 
+      # 11. Mengekspor APK
+      - name: Export Android APK
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/output"
+
           godot \
             --headless \
             --path "$PROJECT_DIR" \
-            --export-debug "Android" \
-            "$GITHUB_WORKSPACE/output/Cosmic-Physics-V1.apk"
+            --export-debug \
+            "Android" \
+            "$GITHUB_WORKSPACE/output/CosmicPhysics_Mobile_V1.apk"
 
-      # 10. Menyimpan APK agar bisa diunduh
+          if [ ! -s "$GITHUB_WORKSPACE/output/CosmicPhysics_Mobile_V1.apk" ]; then
+            echo "ERROR: File APK tidak berhasil dibuat!"
+            exit 1
+          fi
+
+          echo "APK berhasil dibuat."
+          ls -lh "$GITHUB_WORKSPACE/output/"
+
+      # 12. Menyimpan APK sebagai artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Cosmic-Physics-V1-APK
-          path: output/Cosmic-Physics-V1.apk
+          name: CosmicPhysics_Mobile_V1_APK
+          path: output/CosmicPhysics_Mobile_V1.apk
           if-no-files-found: error
           retention-days: 7
