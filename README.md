@@ -1,1 +1,0 @@
-# cosmic-physics-apk-v1
